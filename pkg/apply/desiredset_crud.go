@@ -2,6 +2,7 @@ package apply
 
 import (
 	"bytes"
+	"context"
 
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -52,7 +53,7 @@ func (o *desiredSet) get(nsed bool, namespace, name string, client dynamic.Names
 	return client.Get(o.ctx, name, v1.GetOptions{})
 }
 
-func (o *desiredSet) delete(nsed bool, namespace, name string, client dynamic.NamespaceableResourceInterface, force bool, gvk schema.GroupVersionKind) error {
+func (o *desiredSet) delete(ctx context.Context, nsed bool, namespace, name string, client dynamic.NamespaceableResourceInterface, force bool, gvk schema.GroupVersionKind) error {
 	if !force {
 		if o.noDelete {
 			return nil
@@ -65,8 +66,8 @@ func (o *desiredSet) delete(nsed bool, namespace, name string, client dynamic.Na
 		PropagationPolicy: &deletePolicy,
 	}
 	if nsed {
-		return client.Namespace(namespace).Delete(o.ctx, name, opts)
+		return client.Namespace(namespace).Delete(ctx, name, opts)
 	}
 
-	return client.Delete(o.ctx, name, opts)
+	return client.Delete(ctx, name, opts)
 }

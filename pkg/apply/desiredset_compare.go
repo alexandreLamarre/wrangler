@@ -13,7 +13,10 @@ import (
 	"github.com/rancher/wrangler/v3/pkg/data/convert"
 	"github.com/rancher/wrangler/v3/pkg/objectset"
 	patch2 "github.com/rancher/wrangler/v3/pkg/patch"
+	"github.com/samber/lo"
 	"github.com/sirupsen/logrus"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"k8s.io/apimachinery/pkg/api/meta"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -235,7 +238,7 @@ func applyPatch(gvk schema.GroupVersionKind, reconciler Reconciler, patcher Patc
 	return true, err
 }
 
-func (o *desiredSet) compareObjects(gvk schema.GroupVersionKind, reconciler Reconciler, patcher Patcher, client dynamic.NamespaceableResourceInterface, debugID string, oldObject, newObject runtime.Object, force bool) error {
+func (o *desiredSet) compareObjects(span trace.Span, gvk schema.GroupVersionKind, reconciler Reconciler, patcher Patcher, client dynamic.NamespaceableResourceInterface, debugID string, oldObject, newObject runtime.Object, force bool) error {
 	oldMetadata, err := meta.Accessor(oldObject)
 	if err != nil {
 		return err
@@ -256,12 +259,16 @@ func (o *desiredSet) compareObjects(gvk schema.GroupVersionKind, reconciler Reco
 		GroupVersionKind: gvk,
 	}]...)
 
+	span.SetAttributes(attribute.StringSlice("diffPatches", lo.Map(diffPatches, func(b []byte, _ int) string {
+		return string(b)
+	})))
+
 	if ran, err := applyPatch(gvk, reconciler, patcher, debugID, o.ignorePreviousApplied, oldObject, newObject, diffPatches); err != nil {
 		return err
 	} else if !ran {
+		span.SetAttributes(attribute.Bool("noChange", true))
 		logrus.Debugf("DesiredSet - No change(2) %s %s/%s for %s", gvk, oldMetadata.GetNamespace(), oldMetadata.GetName(), debugID)
 	}
-
 	return nil
 }
 

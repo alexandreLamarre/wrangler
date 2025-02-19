@@ -11,6 +11,8 @@ import (
 	"github.com/rancher/wrangler/v3/pkg/merr"
 	"github.com/rancher/wrangler/v3/pkg/objectset"
 	"github.com/sirupsen/logrus"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"golang.org/x/sync/errgroup"
 	errors2 "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -207,7 +209,13 @@ func (o *desiredSet) filterCrossVersion(gvk schema.GroupVersionKind, keys []obje
 	return result
 }
 
-func (o *desiredSet) process(debugID string, set labels.Selector, gvk schema.GroupVersionKind, objs objectset.ObjectByKey) {
+func (o *desiredSet) process(ctx context.Context, debugID string, set labels.Selector, gvk schema.GroupVersionKind, objs objectset.ObjectByKey) {
+	spanCtx, span := applyTracer.Start(ctx, fmt.Sprintf("process/%s", debugID))
+	defer span.End()
+	span.SetAttributes(
+		attribute.String("GVK", gvk.String()),
+		attribute.String("LabelSelector", set.String()),
+	)
 	controller, client, err := o.getControllerAndClient(debugID, gvk)
 	if err != nil {
 		o.err(err)
@@ -282,14 +290,27 @@ func (o *desiredSet) process(debugID string, set labels.Selector, gvk schema.Gro
 		toDelete = nil
 	}
 
-	createF := func(k objectset.ObjectKey) {
+	createF := func(ctx context.Context, k objectset.ObjectKey) {
+		// TODO : create span
+		_, createSpan := applyTracer.Start(ctx, fmt.Sprintf("Create %s/%s", k.Namespace, k.Name))
+		defer createSpan.End()
+		createSpan.SetAttributes(
+			attribute.String("namespace", k.Namespace),
+			attribute.String("name", k.Name),
+		)
 		obj := objs[k]
+		createSpan.SetAttributes(
+			attribute.String("object", fmt.Sprintf("%T", obj)),
+		)
+		span.AddEvent("prepareObjectForCreate")
 		obj, err := prepareObjectForCreate(gvk, obj)
 		if err != nil {
-			o.err(errors.Wrapf(err, "failed to prepare create %s %s for %s", k, gvk, debugID))
+			err := errors.Wrapf(err, "failed to prepare create %s %s for %s", k, gvk, debugID)
+			createSpan.SetStatus(codes.Error, err.Error())
+			o.err(err)
 			return
 		}
-
+		span.AddEvent("create")
 		_, err = o.create(nsed, k.Namespace, client, obj)
 		if errors2.IsAlreadyExists(err) {
 			// Taking over an object that wasn't previously managed by us
@@ -301,40 +322,66 @@ func (o *desiredSet) process(debugID string, set labels.Selector, gvk schema.Gro
 			}
 		}
 		if err != nil {
-			o.err(errors.Wrapf(err, "failed to create %s %s for %s", k, gvk, debugID))
+			err := errors.Wrapf(err, "failed to create %s %s for %s", k, gvk, debugID)
+			o.err(err)
+			createSpan.SetStatus(codes.Error, err.Error())
 			return
 		}
 		logrus.Debugf("DesiredSet - Created %s %s for %s", gvk, k, debugID)
+		createSpan.SetStatus(codes.Ok, "created")
 	}
 
-	deleteF := func(k objectset.ObjectKey, force bool) {
-		if err := o.delete(nsed, k.Namespace, k.Name, client, force, gvk); err != nil {
-			o.err(errors.Wrapf(err, "failed to delete %s %s for %s", k, gvk, debugID))
+	deleteF := func(ctx context.Context, k objectset.ObjectKey, force bool) {
+		spanCtx, deleteSpan := applyTracer.Start(ctx, fmt.Sprintf("Delete %s/%s", k.Namespace, k.Name))
+		defer span.End()
+		deleteSpan.SetAttributes(
+			attribute.String("namespace", k.Namespace),
+			attribute.String("name", k.Name),
+			attribute.Bool("force", force),
+		)
+		if err := o.delete(spanCtx, nsed, k.Namespace, k.Name, client, force, gvk); err != nil {
+			err := errors.Wrapf(err, "failed to delete %s %s for %s", k, gvk, debugID)
+			o.err(err)
+			deleteSpan.SetStatus(codes.Error, err.Error())
 			return
 		}
 		logrus.Debugf("DesiredSet - Delete %s %s for %s", gvk, k, debugID)
+		deleteSpan.SetStatus(codes.Ok, "deleted")
 	}
 
-	updateF := func(k objectset.ObjectKey) {
-		err := o.compareObjects(gvk, reconciler, patcher, client, debugID, existing[k], objs[k], len(toCreate) > 0 || len(toDelete) > 0)
+	updateF := func(ctx context.Context, k objectset.ObjectKey) {
+		spanCtx, updateSpan := applyTracer.Start(ctx, fmt.Sprintf("Update %s/%s", k.Namespace, k.Name))
+		defer updateSpan.End()
+		updateSpan.SetAttributes(
+			attribute.String("namespace", k.Namespace),
+			attribute.String("name", k.Name),
+		)
+		err := o.compareObjects(updateSpan, gvk, reconciler, patcher, client, debugID, existing[k], objs[k], len(toCreate) > 0 || len(toDelete) > 0)
 		if err == ErrReplace {
-			deleteF(k, true)
-			o.err(fmt.Errorf("DesiredSet - Replace Wait %s %s for %s", gvk, k, debugID))
+			deleteF(spanCtx, k, true)
+			err := fmt.Errorf("DesiredSet - Replace Wait %s %s for %s", gvk, k, debugID)
+			o.err(err)
+			updateSpan.SetStatus(codes.Error, err.Error())
+			return
 		} else if err != nil {
-			o.err(errors.Wrapf(err, "failed to update %s %s for %s", k, gvk, debugID))
+			err := errors.Wrapf(err, "failed to update %s %s for %s", k, gvk, debugID)
+			o.err(err)
+			updateSpan.SetStatus(codes.Error, err.Error())
+			return
 		}
+		updateSpan.SetStatus(codes.Ok, "updated")
 	}
 
 	for _, k := range toCreate {
-		createF(k)
+		createF(spanCtx, k)
 	}
 
 	for _, k := range toUpdate {
-		updateF(k)
+		updateF(spanCtx, k)
 	}
 
 	for _, k := range toDelete {
-		deleteF(k, false)
+		deleteF(spanCtx, k, false)
 	}
 }
 
