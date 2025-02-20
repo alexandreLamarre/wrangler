@@ -34,7 +34,7 @@ func (o *desiredSet) toUnstructured(obj runtime.Object) (*unstructured.Unstructu
 	return unstruct, json.Unmarshal(buf.Bytes(), &unstruct.Object)
 }
 
-func (o *desiredSet) create(nsed bool, namespace string, client dynamic.NamespaceableResourceInterface, obj runtime.Object) (runtime.Object, error) {
+func (o *desiredSet) create(ctx context.Context, nsed bool, namespace string, client dynamic.NamespaceableResourceInterface, obj runtime.Object) (runtime.Object, error) {
 	unstr, err := o.toUnstructured(obj)
 	if err != nil {
 		return nil, err
@@ -43,7 +43,7 @@ func (o *desiredSet) create(nsed bool, namespace string, client dynamic.Namespac
 	if nsed {
 		return client.Namespace(namespace).Create(o.ctx, unstr, v1.CreateOptions{})
 	}
-	return client.Create(o.ctx, unstr, v1.CreateOptions{})
+	return client.Create(ctx, unstr, v1.CreateOptions{})
 }
 
 func (o *desiredSet) get(nsed bool, namespace, name string, client dynamic.NamespaceableResourceInterface) (runtime.Object, error) {

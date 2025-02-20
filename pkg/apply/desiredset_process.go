@@ -186,11 +186,11 @@ func (o *desiredSet) clearNamespace(objs objectset.ObjectByKey) error {
 }
 
 func (o *desiredSet) createPatcher(client dynamic.NamespaceableResourceInterface) Patcher {
-	return func(namespace, name string, pt types2.PatchType, data []byte) (object runtime.Object, e error) {
+	return func(ctx context.Context, namespace, name string, pt types2.PatchType, data []byte) (object runtime.Object, e error) {
 		if namespace != "" {
-			return client.Namespace(namespace).Patch(o.ctx, name, pt, data, v1.PatchOptions{})
+			return client.Namespace(namespace).Patch(ctx, name, pt, data, v1.PatchOptions{})
 		}
-		return client.Patch(o.ctx, name, pt, data, v1.PatchOptions{})
+		return client.Patch(ctx, name, pt, data, v1.PatchOptions{})
 	}
 }
 
@@ -275,7 +275,7 @@ func (o *desiredSet) process(ctx context.Context, debugID string, set labels.Sel
 		o.plan.Delete[gvk] = toDelete
 
 		reconciler = nil
-		patcher = func(namespace, name string, pt types2.PatchType, data []byte) (runtime.Object, error) {
+		patcher = func(ctx context.Context, namespace, name string, pt types2.PatchType, data []byte) (runtime.Object, error) {
 			data, err := sanitizePatch(data, true)
 			if err != nil {
 				return nil, err
@@ -291,8 +291,7 @@ func (o *desiredSet) process(ctx context.Context, debugID string, set labels.Sel
 	}
 
 	createF := func(ctx context.Context, k objectset.ObjectKey) {
-		// TODO : create span
-		_, createSpan := applyTracer.Start(ctx, fmt.Sprintf("Create %s/%s", k.Namespace, k.Name))
+		spanCtx, createSpan := applyTracer.Start(ctx, fmt.Sprintf("Create %s/%s", k.Namespace, k.Name))
 		defer createSpan.End()
 		createSpan.SetAttributes(
 			attribute.String("namespace", k.Namespace),
@@ -311,7 +310,7 @@ func (o *desiredSet) process(ctx context.Context, debugID string, set labels.Sel
 			return
 		}
 		span.AddEvent("create")
-		_, err = o.create(nsed, k.Namespace, client, obj)
+		_, err = o.create(spanCtx, nsed, k.Namespace, client, obj)
 		if errors2.IsAlreadyExists(err) {
 			// Taking over an object that wasn't previously managed by us
 			existingObj, err := o.get(nsed, k.Namespace, k.Name, client)
@@ -356,7 +355,7 @@ func (o *desiredSet) process(ctx context.Context, debugID string, set labels.Sel
 			attribute.String("namespace", k.Namespace),
 			attribute.String("name", k.Name),
 		)
-		err := o.compareObjects(updateSpan, gvk, reconciler, patcher, client, debugID, existing[k], objs[k], len(toCreate) > 0 || len(toDelete) > 0)
+		err := o.compareObjects(spanCtx, updateSpan, gvk, reconciler, patcher, client, debugID, existing[k], objs[k], len(toCreate) > 0 || len(toDelete) > 0)
 		if err == ErrReplace {
 			deleteF(spanCtx, k, true)
 			err := fmt.Errorf("DesiredSet - Replace Wait %s %s for %s", gvk, k, debugID)
