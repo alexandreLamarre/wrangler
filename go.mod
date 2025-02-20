@@ -31,7 +31,7 @@ require (
 	sigs.k8s.io/cli-utils v0.37.2
 )
 
-replace github.com/rancher/lasso => github.com/alexandreLamarre/lasso v0.0.0-20250220164910-86ea5a76fc72
+replace github.com/rancher/lasso => github.com/alexandreLamarre/lasso v0.0.0-20250220182050-3d3f249800e7
 
 require (
 	cel.dev/expr v0.18.0 // indirect

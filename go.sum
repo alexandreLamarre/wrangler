@@ -1,7 +1,7 @@
 cel.dev/expr v0.18.0 h1:CJ6drgk+Hf96lkLikr4rFf19WrU0BOWEihyZnI2TAzo=
 cel.dev/expr v0.18.0/go.mod h1:MrpN08Q+lEBs+bGYdLxxHkZoUSsCp0nSKTs0nTymJgw=
-github.com/alexandreLamarre/lasso v0.0.0-20250220164910-86ea5a76fc72 h1:EUYDe6P3riu+S9S2rCPausXd7mr2SHK3/Q9yHJTBXG8=
-github.com/alexandreLamarre/lasso v0.0.0-20250220164910-86ea5a76fc72/go.mod h1:hP/cdkLE/jjzg9EBPVyFwOP1pfWVdL2eFxY+LNCYGVE=
+github.com/alexandreLamarre/lasso v0.0.0-20250220182050-3d3f249800e7 h1:R9Zu1IlTziuO4aFQg2LnJtOIZOukTk9p6hmazlAFuy0=
+github.com/alexandreLamarre/lasso v0.0.0-20250220182050-3d3f249800e7/go.mod h1:hP/cdkLE/jjzg9EBPVyFwOP1pfWVdL2eFxY+LNCYGVE=
 github.com/antlr4-go/antlr/v4 v4.13.0 h1:lxCg3LAv+EUK6t1i0y1V6/SLeUi0eKEKdhQAlS8TVTI=
 github.com/antlr4-go/antlr/v4 v4.13.0/go.mod h1:pfChB/xh/Unjila75QW7+VU4TSnWnnk9UTnmpPaOR2g=
 github.com/asaskevich/govalidator v0.0.0-20190424111038-f61b66f89f4a h1:idn718Q4B6AGu/h5Sxe66HYVdqdGu2l9Iebqhi/AEoA=
