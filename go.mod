@@ -31,6 +31,8 @@ require (
 	sigs.k8s.io/cli-utils v0.37.2
 )
 
+replace github.com/rancher/lasso => github.com/alexandreLamarre/lasso v0.0.0-20250220164910-86ea5a76fc72
+
 require (
 	cel.dev/expr v0.18.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.0 // indirect
@@ -96,6 +98,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/apiserver v0.32.1 // indirect
 	k8s.io/component-base v0.32.1 // indirect
+	k8s.io/klog v1.0.0 // indirect
 	k8s.io/klog/v2 v2.130.1 // indirect
 	k8s.io/utils v0.0.0-20241104100929-3ea5e8cea738 // indirect
 	sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.31.0 // indirect
