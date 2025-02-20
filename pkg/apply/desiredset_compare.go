@@ -3,6 +3,7 @@ package apply
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/base64"
 	"io/ioutil"
 	"strings"
@@ -13,7 +14,10 @@ import (
 	"github.com/rancher/wrangler/v3/pkg/data/convert"
 	"github.com/rancher/wrangler/v3/pkg/objectset"
 	patch2 "github.com/rancher/wrangler/v3/pkg/patch"
+	"github.com/samber/lo"
 	"github.com/sirupsen/logrus"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"k8s.io/apimachinery/pkg/api/meta"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -169,7 +173,7 @@ func sanitizePatch(patch []byte, removeObjectSetAnnotation bool) ([]byte, error)
 	return json.Marshal(data)
 }
 
-func applyPatch(gvk schema.GroupVersionKind, reconciler Reconciler, patcher Patcher, debugID string, ignoreOriginal bool, oldObject, newObject runtime.Object, diffPatches [][]byte) (bool, error) {
+func applyPatch(ctx context.Context, gvk schema.GroupVersionKind, reconciler Reconciler, patcher Patcher, debugID string, ignoreOriginal bool, oldObject, newObject runtime.Object, diffPatches [][]byte) (bool, error) {
 	oldMetadata, err := meta.Accessor(oldObject)
 	if err != nil {
 		return false, err
@@ -230,12 +234,12 @@ func applyPatch(gvk schema.GroupVersionKind, reconciler Reconciler, patcher Patc
 	}
 
 	logrus.Debugf("DesiredSet - Updated %s %s/%s for %s -- %s %s", gvk, oldMetadata.GetNamespace(), oldMetadata.GetName(), debugID, patchType, patch)
-	_, err = patcher(oldMetadata.GetNamespace(), oldMetadata.GetName(), patchType, patch)
+	_, err = patcher(ctx, oldMetadata.GetNamespace(), oldMetadata.GetName(), patchType, patch)
 
 	return true, err
 }
 
-func (o *desiredSet) compareObjects(gvk schema.GroupVersionKind, reconciler Reconciler, patcher Patcher, client dynamic.NamespaceableResourceInterface, debugID string, oldObject, newObject runtime.Object, force bool) error {
+func (o *desiredSet) compareObjects(ctx context.Context, span trace.Span, gvk schema.GroupVersionKind, reconciler Reconciler, patcher Patcher, client dynamic.NamespaceableResourceInterface, debugID string, oldObject, newObject runtime.Object, force bool) error {
 	oldMetadata, err := meta.Accessor(oldObject)
 	if err != nil {
 		return err
@@ -256,12 +260,16 @@ func (o *desiredSet) compareObjects(gvk schema.GroupVersionKind, reconciler Reco
 		GroupVersionKind: gvk,
 	}]...)
 
-	if ran, err := applyPatch(gvk, reconciler, patcher, debugID, o.ignorePreviousApplied, oldObject, newObject, diffPatches); err != nil {
+	span.SetAttributes(attribute.StringSlice("diffPatches", lo.Map(diffPatches, func(b []byte, _ int) string {
+		return string(b)
+	})))
+
+	if ran, err := applyPatch(ctx, gvk, reconciler, patcher, debugID, o.ignorePreviousApplied, oldObject, newObject, diffPatches); err != nil {
 		return err
 	} else if !ran {
+		span.SetAttributes(attribute.Bool("noChange", true))
 		logrus.Debugf("DesiredSet - No change(2) %s %s/%s for %s", gvk, oldMetadata.GetNamespace(), oldMetadata.GetName(), debugID)
 	}
-
 	return nil
 }
 

@@ -7,7 +7,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/samber/lo"
 	"github.com/sirupsen/logrus"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 
 	gvk2 "github.com/rancher/wrangler/v3/pkg/gvk"
 
@@ -31,6 +35,10 @@ const (
 	LabelHash      = "objectset.rio.cattle.io/hash"
 	LabelPrefix    = "objectset.rio.cattle.io/"
 	LabelPrune     = "objectset.rio.cattle.io/prune"
+)
+
+var (
+	applyTracer = otel.GetTracerProvider().Tracer("github.com/rancher/wrangler/v3/pkg/apply")
 )
 
 var (
@@ -63,6 +71,35 @@ func (o *desiredSet) getRateLimit(labelHash string) flowcontrol.RateLimiter {
 	return rl
 }
 
+func (o *desiredSet) attrs() []attribute.KeyValue {
+	return []attribute.KeyValue{
+		attribute.String("setID", o.setID),
+		attribute.String("owner", fmt.Sprintf("%T", o.owner)),
+		attribute.Bool("remove", o.remove),
+		attribute.Bool("noDelete", o.noDelete),
+		attribute.Bool("createPlan", o.createPlan),
+		attribute.Bool("setOwnerReference", o.setOwnerReference),
+		attribute.Bool("ownerReferenceController", o.ownerReferenceController),
+		attribute.Bool("ownerReferenceBlock", o.ownerReferenceBlock),
+		attribute.Bool("strictCaching", o.strictCaching),
+		attribute.Bool("restrictClusterScoped", o.restrictClusterScoped),
+		attribute.Float64("ratelimitingQps", float64(o.ratelimitingQps)),
+		attribute.StringSlice("injectorNames", o.injectorNames),
+		attribute.StringSlice("pruneTypes", lo.Map(lo.Keys(o.pruneTypes), func(gvk schema.GroupVersionKind, _ int) string {
+			return gvk.String()
+		})),
+		attribute.StringSlice("patchers", lo.Map(lo.Keys(o.patchers), func(gvk schema.GroupVersionKind, _ int) string {
+			return gvk.String()
+		})),
+		attribute.StringSlice("reconcilers", lo.Map(lo.Keys(o.reconcilers), func(gvk schema.GroupVersionKind, _ int) string {
+			return gvk.String()
+		})),
+		attribute.StringSlice("noDeleteGVK", lo.Map(lo.Keys(o.reconcilers), func(gvk schema.GroupVersionKind, _ int) string {
+			return gvk.String()
+		})),
+	}
+}
+
 func (o *desiredSet) dryRun() (Plan, error) {
 	o.createPlan = true
 	o.plan.Create = objectset.ObjectKeyByGVK{}
@@ -73,16 +110,22 @@ func (o *desiredSet) dryRun() (Plan, error) {
 }
 
 func (o *desiredSet) apply() error {
+	spanCtx, span := applyTracer.Start(o.ctx, "apply")
+	defer span.End()
+
 	if o.objs == nil || o.objs.Len() == 0 {
 		o.remove = true
 	}
+	span.SetAttributes(o.attrs()...)
 
 	if err := o.Err(); err != nil {
+		span.SetStatus(codes.Error, err.Error())
 		return err
 	}
-
+	span.AddEvent("GetLabelsAndAnnotations")
 	labelSet, annotationSet, err := GetLabelsAndAnnotations(o.setID, o.owner)
 	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
 		return o.err(err)
 	}
 
@@ -94,30 +137,42 @@ func (o *desiredSet) apply() error {
 			logrus.Infof("rate limited %s(%s) %s", o.setID, labelSet, d)
 		}
 	}
-
+	span.AddEvent("injectLabelsAndAnnotations")
 	objList, err := o.injectLabelsAndAnnotations(labelSet, annotationSet)
 	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
 		return o.err(err)
 	}
-
+	span.AddEvent("runInjectors")
 	objList, err = o.runInjectors(objList)
 	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
 		return o.err(err)
 	}
 
+	span.AddEvent("collect")
 	objs := o.collect(objList)
 
 	debugID := o.debugID()
+	span.SetAttributes(attribute.String("debugID", debugID))
+	span.AddEvent("GetSelector")
 	sel, err := GetSelector(labelSet)
 	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
 		return o.err(err)
 	}
 
 	for _, gvk := range o.objs.GVKOrder(o.knownGVK()...) {
-		o.process(debugID, sel, gvk, objs[gvk])
+		span.AddEvent(fmt.Sprintf("process : %s", gvk.String()))
+		o.process(spanCtx, debugID, sel, gvk, objs[gvk])
 	}
 
-	return o.Err()
+	if err := o.Err(); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return err
+	}
+	span.SetStatus(codes.Ok, "success")
+	return nil
 }
 
 func (o *desiredSet) knownGVK() (ret []schema.GroupVersionKind) {

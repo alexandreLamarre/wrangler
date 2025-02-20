@@ -20,7 +20,7 @@ const (
 	defaultNamespace = "default"
 )
 
-type Patcher func(namespace, name string, pt types.PatchType, data []byte) (runtime.Object, error)
+type Patcher func(ctx context.Context, namespace, name string, pt types.PatchType, data []byte) (runtime.Object, error)
 
 // Reconciler return false if it did not handle this object
 type Reconciler func(oldObj runtime.Object, newObj runtime.Object) (bool, error)
