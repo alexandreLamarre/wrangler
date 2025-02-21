@@ -71,7 +71,7 @@ func (o *desiredSet) getRateLimit(labelHash string) flowcontrol.RateLimiter {
 	return rl
 }
 
-func (o *desiredSet) attrs() []attribute.KeyValue {
+func (o *desiredSet) staticAttrs() []attribute.KeyValue {
 	return []attribute.KeyValue{
 		attribute.String("setID", o.setID),
 		attribute.String("owner", fmt.Sprintf("%T", o.owner)),
@@ -110,13 +110,13 @@ func (o *desiredSet) dryRun() (Plan, error) {
 }
 
 func (o *desiredSet) apply() error {
-	spanCtx, span := applyTracer.Start(o.ctx, "apply")
+	spanCtx, span := applyTracer.Start(o.ctx, "apply.Apply")
 	defer span.End()
 
 	if o.objs == nil || o.objs.Len() == 0 {
 		o.remove = true
 	}
-	span.SetAttributes(o.attrs()...)
+	span.SetAttributes(o.staticAttrs()...)
 
 	if err := o.Err(); err != nil {
 		span.SetStatus(codes.Error, err.Error())
