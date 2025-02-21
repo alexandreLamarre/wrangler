@@ -210,9 +210,10 @@ func (o *desiredSet) filterCrossVersion(gvk schema.GroupVersionKind, keys []obje
 }
 
 func (o *desiredSet) process(ctx context.Context, debugID string, set labels.Selector, gvk schema.GroupVersionKind, objs objectset.ObjectByKey) {
-	spanCtx, span := applyTracer.Start(ctx, fmt.Sprintf("process/%s", debugID))
+	spanCtx, span := applyTracer.Start(ctx, "apply.process")
 	defer span.End()
 	span.SetAttributes(
+		attribute.String("debugID", debugID),
 		attribute.String("GVK", gvk.String()),
 		attribute.String("LabelSelector", set.String()),
 	)
@@ -291,7 +292,7 @@ func (o *desiredSet) process(ctx context.Context, debugID string, set labels.Sel
 	}
 
 	createF := func(ctx context.Context, k objectset.ObjectKey) {
-		spanCtx, createSpan := applyTracer.Start(ctx, fmt.Sprintf("Create %s/%s", k.Namespace, k.Name))
+		spanCtx, createSpan := applyTracer.Start(ctx, "apply.Create")
 		defer createSpan.End()
 		createSpan.SetAttributes(
 			attribute.String("namespace", k.Namespace),
@@ -331,7 +332,7 @@ func (o *desiredSet) process(ctx context.Context, debugID string, set labels.Sel
 	}
 
 	deleteF := func(ctx context.Context, k objectset.ObjectKey, force bool) {
-		spanCtx, deleteSpan := applyTracer.Start(ctx, fmt.Sprintf("Delete %s/%s", k.Namespace, k.Name))
+		spanCtx, deleteSpan := applyTracer.Start(ctx, "apply.Delete")
 		defer span.End()
 		deleteSpan.SetAttributes(
 			attribute.String("namespace", k.Namespace),
@@ -349,7 +350,7 @@ func (o *desiredSet) process(ctx context.Context, debugID string, set labels.Sel
 	}
 
 	updateF := func(ctx context.Context, k objectset.ObjectKey) {
-		spanCtx, updateSpan := applyTracer.Start(ctx, fmt.Sprintf("Update %s/%s", k.Namespace, k.Name))
+		spanCtx, updateSpan := applyTracer.Start(ctx, "apply.Update")
 		defer updateSpan.End()
 		updateSpan.SetAttributes(
 			attribute.String("namespace", k.Namespace),
@@ -370,6 +371,11 @@ func (o *desiredSet) process(ctx context.Context, debugID string, set labels.Sel
 		}
 		updateSpan.SetStatus(codes.Ok, "updated")
 	}
+	span.SetAttributes(
+		attribute.Int("toCreate", len(toCreate)),
+		attribute.Int("toDelete", len(toDelete)),
+		attribute.Int("toUpdate", len(toUpdate)),
+	)
 
 	for _, k := range toCreate {
 		createF(spanCtx, k)

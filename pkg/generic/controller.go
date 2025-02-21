@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/rancher/lasso/pkg/controller"
+	"github.com/rancher/lasso/pkg/tracing"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -228,9 +229,23 @@ func (c *Controller[T, TList]) Updater() Updater {
 	}
 }
 
+func wrapWithTracingHandler(handler Handler) controller.SharedControllerHandlerFunc {
+	return func(ctx context.Context, key string, obj runtime.Object) (runtime.Object, error) {
+		spanCtx, span := genericTracer.Start(ctx, "generic.Controller.Handler")
+		defer span.End()
+		if tracing.IsDistributedTracingEnabled() {
+			tracing.Inject(spanCtx, obj)
+		}
+		obj, err := handler(key, obj)
+		if err != nil {
+		}
+		return obj, err
+	}
+}
+
 // AddGenericHandler runs the given handler when the controller detects an object was changed.
 func (c *Controller[T, TList]) AddGenericHandler(ctx context.Context, name string, handler Handler) {
-	c.controller.RegisterHandler(ctx, name, controller.SharedControllerHandlerFunc(handler))
+	c.controller.RegisterHandler(ctx, name, controller.SharedControllerHandlerFunc(wrapWithTracingHandler(handler)))
 }
 
 // AddGenericRemoveHandler runs the given handler when the controller detects an object was removed.
